@@ -18,7 +18,7 @@ struct TVSenderManagerApp: App {
         WindowGroup("Samsung TV Senderverwaltung") {
             ContentView()
                 .environmentObject(store)
-                .frame(minWidth: 980, minHeight: 620)
+                .frame(minWidth: 1080, minHeight: 640)
         }
         .windowToolbarStyle(.unified)
         .commands {
@@ -32,15 +32,19 @@ struct TVSenderManagerApp: App {
                 Button("Speichern") { store.save() }
                     .keyboardShortcut("s", modifiers: .command)
                     .disabled(!store.hasUnsavedChanges)
+                Button("Speichern unter…") { store.saveAsFolderPicker() }
+                    .keyboardShortcut("s", modifiers: [.command, .shift])
+                    .disabled(store.folderURL == nil)
                 Button("Änderungen verwerfen") { store.discardChanges() }
                     .disabled(!store.hasUnsavedChanges)
             }
-            CommandGroup(after: .pasteboard) {
-                Divider()
-                Button("Suche fokussieren") {
-                    NSApp.keyWindow?.makeFirstResponder(nil)
-                }
-                .keyboardShortcut("f", modifiers: .command)
+            CommandGroup(replacing: .undoRedo) {
+                Button("Rückgängig") { store.undo() }
+                    .keyboardShortcut("z", modifiers: .command)
+                    .disabled(!store.canUndo)
+                Button("Wiederherstellen") { store.redo() }
+                    .keyboardShortcut("z", modifiers: [.command, .shift])
+                    .disabled(!store.canRedo)
             }
         }
     }

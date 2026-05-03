@@ -12,11 +12,11 @@ struct ContentView: View {
             } else {
                 NavigationSplitView {
                     SidebarView()
-                        .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
+                        .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 320)
                 } detail: {
                     HSplitView {
                         ChannelTableView()
-                            .frame(minWidth: 520)
+                            .frame(minWidth: 540)
                         InspectorView()
                             .frame(minWidth: 280, idealWidth: 320, maxWidth: 420)
                     }
@@ -93,9 +93,7 @@ struct DropZone: View {
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(
-                    style: StrokeStyle(lineWidth: 2, dash: [8, 6])
-                )
+                .strokeBorder(style: StrokeStyle(lineWidth: 2, dash: [8, 6]))
                 .foregroundStyle(isTargeted ? Color.accentColor : Color.secondary.opacity(0.4))
                 .background(
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -133,43 +131,58 @@ struct SidebarView: View {
     @EnvironmentObject var store: ChannelStore
 
     var body: some View {
-        List(selection: Binding(
-            get: { store.selectedSource },
-            set: { if let v = $0 { store.selectedSource = v } }
-        )) {
+        List(selection: $store.currentFilter) {
+            Section {
+                FilterRow(filter: .all)
+            }
+
             Section("Quellen") {
-                ForEach(Source.allCases) { src in
-                    let count = store.count(for: src)
-                    if count > 0 {
-                        Label {
-                            HStack {
-                                Text(src.label)
-                                Spacer()
-                                Text("\(count)")
-                                    .font(.caption.monospacedDigit())
-                                    .foregroundStyle(.secondary)
-                            }
-                        } icon: {
-                            Image(systemName: src.systemImage)
-                        }
-                        .tag(src)
+                FilterRow(filter: .source(.cable))
+                FilterRow(filter: .source(.ip))
+            }
+
+            Section("Schnellansichten") {
+                FilterRow(filter: .quality(.uhd))
+                FilterRow(filter: .quality(.hd))
+                FilterRow(filter: .tvOnly)
+                FilterRow(filter: .radioOnly)
+                FilterRow(filter: .scrambled)
+                FilterRow(filter: .hidden)
+                FilterRow(filter: .favorites)
+            }
+
+            let providers = store.providers
+            if !providers.isEmpty {
+                Section("Anbieter") {
+                    ForEach(providers, id: \.name) { p in
+                        FilterRow(filter: .provider(p.name), overrideCount: p.count)
                     }
                 }
             }
-
-            Section("Schnellansicht") {
-                let chans = store.currentChannels
-                Label("HD-Sender · \(chans.filter { $0.quality == .hd || $0.quality == .uhd }.count)",
-                      systemImage: "sparkles.tv")
-                Label("Verschlüsselt · \(chans.filter(\.scrambled).count)",
-                      systemImage: "lock")
-                Label("Ausgeblendet · \(chans.filter(\.hidden).count)",
-                      systemImage: "eye.slash")
-                Label("Favoriten · \(chans.filter(\.isFavorite).count)",
-                      systemImage: "star.fill")
-            }
         }
         .listStyle(.sidebar)
+    }
+}
+
+struct FilterRow: View {
+    @EnvironmentObject var store: ChannelStore
+    let filter: ChannelFilter
+    var overrideCount: Int? = nil
+
+    var body: some View {
+        let count = overrideCount ?? store.count(for: filter)
+        Label {
+            HStack {
+                Text(filter.label).lineLimit(1)
+                Spacer()
+                Text("\(count)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+        } icon: {
+            Image(systemName: filter.systemImage)
+        }
+        .tag(filter)
     }
 }
 
@@ -180,6 +193,7 @@ struct ChannelTableView: View {
     @State private var sortOrder: [KeyPathComparator<Channel>] = [
         .init(\.major, order: .forward)
     ]
+    @State private var editingMajorId: Int64? = nil
 
     var sortedChannels: [Channel] {
         store.filteredChannels.sorted(using: sortOrder)
@@ -195,11 +209,14 @@ struct ChannelTableView: View {
 
             Table(of: Channel.self, selection: $store.selection, sortOrder: $sortOrder) {
                 TableColumn("#", value: \.major) { ch in
-                    Text("\(ch.major)")
-                        .monospacedDigit()
-                        .foregroundStyle(ch.hidden ? .secondary : .primary)
+                    MajorCell(channel: ch, isEditing: editingMajorId == ch.srvId) {
+                        editingMajorId = nil
+                    }
+                    .onTapGesture(count: 2) {
+                        editingMajorId = ch.srvId
+                    }
                 }
-                .width(min: 50, ideal: 60, max: 80)
+                .width(min: 60, ideal: 70, max: 90)
 
                 TableColumn("Name", value: \.name) { ch in
                     HStack(spacing: 8) {
@@ -210,10 +227,26 @@ struct ChannelTableView: View {
                             .strikethrough(ch.hidden)
                             .foregroundStyle(ch.hidden ? .secondary : .primary)
                     }
+                    .contentShape(Rectangle())
+                    .onTapGesture(count: 2) {
+                        store.toggleHidden([ch.srvId])
+                    }
                 }
                 .width(min: 200, ideal: 280)
 
-                TableColumn("Typ") { ch in
+                TableColumn("Quelle", value: \.source.shortLabel) { ch in
+                    HStack(spacing: 4) {
+                        Image(systemName: ch.source.systemImage)
+                            .foregroundStyle(.secondary)
+                            .font(.caption)
+                        Text(ch.source.shortLabel)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .width(min: 64, ideal: 72, max: 96)
+
+                TableColumn("Typ", value: \.typeBadge) { ch in
                     Text(ch.typeBadge)
                         .font(.caption.monospaced())
                         .padding(.horizontal, 6)
@@ -224,22 +257,30 @@ struct ChannelTableView: View {
                 }
                 .width(min: 60, ideal: 70, max: 90)
 
-                TableColumn("Anbieter") { ch in
+                TableColumn("Anbieter", value: \.providerSortKey) { ch in
                     Text(ch.providerName ?? "—")
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
                 .width(min: 120, ideal: 160)
 
+                TableColumn("Sichtbar", value: \.visibilitySortKey) { ch in
+                    Button {
+                        store.toggleHidden([ch.srvId])
+                    } label: {
+                        Image(systemName: ch.hidden ? "eye.slash" : "eye")
+                            .foregroundStyle(ch.hidden ? Color.secondary : Color.blue)
+                    }
+                    .buttonStyle(.plain)
+                    .help(ch.hidden ? "Sichtbar machen" : "Ausblenden")
+                }
+                .width(min: 64, ideal: 70, max: 80)
+
                 TableColumn("") { ch in
                     HStack(spacing: 6) {
                         if ch.scrambled {
                             Image(systemName: "lock").foregroundStyle(.secondary)
                                 .help("Verschlüsselt")
-                        }
-                        if ch.hidden {
-                            Image(systemName: "eye.slash").foregroundStyle(.secondary)
-                                .help("Ausgeblendet")
                         }
                         if ch.locked {
                             Image(systemName: "key.fill").foregroundStyle(.secondary)
@@ -248,10 +289,21 @@ struct ChannelTableView: View {
                     }
                     .font(.caption)
                 }
-                .width(min: 60, ideal: 80, max: 100)
+                .width(min: 32, ideal: 40, max: 60)
             } rows: {
                 ForEach(sortedChannels) { ch in
                     TableRow(ch)
+                        .draggable(ChannelDragPayload(srvId: ch.srvId))
+                        .dropDestination(for: ChannelDragPayload.self) { items in
+                            let dropped = Set(items.map(\.srvId))
+                            // If the user dragged a selected row, carry the
+                            // whole selection along; otherwise just move what
+                            // was actually dragged.
+                            let toMove = dropped.intersection(store.selection).isEmpty
+                                ? dropped
+                                : store.selection
+                            store.moveChannels(toMove, before: ch.srvId)
+                        }
                         .contextMenu {
                             ChannelContextMenu(targetIDs: ids(forContextOn: ch))
                         }
@@ -265,6 +317,64 @@ struct ChannelTableView: View {
     private func ids(forContextOn ch: Channel) -> Set<Int64> {
         if store.selection.contains(ch.srvId) { return store.selection }
         return [ch.srvId]
+    }
+}
+
+private extension Channel {
+    var providerSortKey: String { providerName ?? "" }
+    var visibilitySortKey: Int   { hidden ? 1 : 0 }
+}
+
+extension Source {
+    // Used to sort the source column.
+    var sortKey: String { shortLabel }
+}
+
+// MARK: - Drag payload (Transferable)
+
+struct ChannelDragPayload: Codable, Transferable, Sendable, Hashable {
+    let srvId: Int64
+    static var transferRepresentation: some TransferRepresentation {
+        CodableRepresentation(contentType: .data)
+    }
+}
+
+// MARK: - Inline major editor
+
+struct MajorCell: View {
+    @EnvironmentObject var store: ChannelStore
+    let channel: Channel
+    let isEditing: Bool
+    let onCommit: () -> Void
+    @State private var draft: String = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        if isEditing {
+            TextField("", text: $draft)
+                .textFieldStyle(.plain)
+                .focused($focused)
+                .onAppear {
+                    draft = "\(channel.major)"
+                    focused = true
+                }
+                .onSubmit { commit() }
+                .onChange(of: focused) { _, new in
+                    if !new { commit() }
+                }
+                .monospacedDigit()
+        } else {
+            Text("\(channel.major)")
+                .monospacedDigit()
+                .foregroundStyle(channel.hidden ? .secondary : .primary)
+        }
+    }
+
+    private func commit() {
+        if let n = Int(draft.trimmingCharacters(in: .whitespaces)), n >= 0 {
+            if n != channel.major { store.setMajor(channel.srvId, to: n) }
+        }
+        onCommit()
     }
 }
 
@@ -288,6 +398,7 @@ struct SearchBar: View {
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
+                .keyboardShortcut(.escape, modifiers: [])
             }
         }
         .onAppear { focused = true }
@@ -304,10 +415,16 @@ struct ChannelContextMenu: View {
         Button("Favorit umschalten") { store.toggleFavorite(targetIDs) }
             .keyboardShortcut("d", modifiers: .command)
         Button("Ausblenden umschalten") { store.toggleHidden(targetIDs) }
-            .keyboardShortcut("h", modifiers: .command)
-        Divider()
-        Button("Alphabetisch sortieren (alle)") { store.sortAlphabetically() }
-        Button("Nummern lückenlos neu vergeben") { store.renumberToContiguous() }
+            .keyboardShortcut("e", modifiers: .command)
+        if targetIDs.count >= 2 {
+            Divider()
+            Button("Auswahl alphabetisch sortieren") {
+                store.sortAlphabetically()
+            }
+            Button("Auswahl Nummern lückenlos vergeben") {
+                store.renumberToContiguous()
+            }
+        }
         Divider()
         Button("Aus Liste entfernen", role: .destructive) {
             store.deleteChannels(targetIDs)
@@ -323,7 +440,7 @@ struct InspectorView: View {
 
     private var selected: [Channel] {
         let ids = store.selection
-        return store.currentChannels.filter { ids.contains($0.srvId) }
+        return store.filteredChannels.filter { ids.contains($0.srvId) }
     }
 
     var body: some View {
@@ -417,6 +534,9 @@ struct SingleChannelEditor: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Technische Details").font(.caption).foregroundStyle(.secondary)
                 infoRow("Service-ID", "\(channel.srvId)")
+                if channel.siblingSrvIds.count > 1 {
+                    infoRow("IP-Carrier", "\(channel.siblingSrvIds.count)")
+                }
                 infoRow("srvType",   "\(channel.srvType)")
                 if let f = channel.freq { infoRow("Frequenz", "\(f) kHz") }
                 if let p = channel.providerName { infoRow("Anbieter", p) }
@@ -480,6 +600,14 @@ struct MultiSelectionEditor: View {
                 Label("Ausblenden umschalten", systemImage: "eye.slash")
                     .frame(maxWidth: .infinity)
             }
+            Button { store.sortAlphabetically() } label: {
+                Label("Auswahl alphabetisch sortieren", systemImage: "textformat")
+                    .frame(maxWidth: .infinity)
+            }
+            Button { store.renumberToContiguous() } label: {
+                Label("Nummern lückenlos vergeben", systemImage: "number")
+                    .frame(maxWidth: .infinity)
+            }
             Button(role: .destructive) {
                 store.deleteChannels(ids)
             } label: {
@@ -499,7 +627,7 @@ struct StatusBar: View {
         HStack(spacing: 12) {
             Text(store.status).font(.caption).foregroundStyle(.secondary)
             Spacer()
-            Text("\(store.filteredChannels.count) von \(store.currentChannels.count) angezeigt")
+            Text("\(store.filteredChannels.count) von \(store.allChannels.count) angezeigt")
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
             if store.hasUnsavedChanges {
@@ -531,6 +659,18 @@ struct ToolbarItems: ToolbarContent {
         }
 
         ToolbarItem(placement: .primaryAction) {
+            Button { store.undo() } label: { Label("Rückgängig", systemImage: "arrow.uturn.backward") }
+                .disabled(!store.canUndo)
+                .help("Rückgängig (⌘Z)")
+        }
+
+        ToolbarItem(placement: .primaryAction) {
+            Button { store.redo() } label: { Label("Wiederherstellen", systemImage: "arrow.uturn.forward") }
+                .disabled(!store.canRedo)
+                .help("Wiederherstellen (⇧⌘Z)")
+        }
+
+        ToolbarItem(placement: .primaryAction) {
             Button {
                 store.toggleFavorite(store.selection)
             } label: {
@@ -547,28 +687,18 @@ struct ToolbarItems: ToolbarContent {
                 Label("Ausblenden", systemImage: "eye.slash")
             }
             .disabled(store.selection.isEmpty)
-            .help("Auswahl ausblenden (⌘H)")
+            .help("Auswahl ausblenden (⌘E)")
         }
 
         ToolbarItem(placement: .primaryAction) {
             Menu {
-                Button("Alphabetisch sortieren (alle)") { store.sortAlphabetically() }
-                Button("Nummern lückenlos neu vergeben") { store.renumberToContiguous() }
-                Divider()
                 Button("Im Finder anzeigen") { store.revealInFinder() }
+                Divider()
+                Button("Änderungen verwerfen") { store.discardChanges() }
+                    .disabled(!store.hasUnsavedChanges)
             } label: {
                 Label("Mehr", systemImage: "ellipsis.circle")
             }
-        }
-
-        ToolbarItem(placement: .primaryAction) {
-            Button {
-                store.discardChanges()
-            } label: {
-                Label("Verwerfen", systemImage: "arrow.uturn.backward")
-            }
-            .disabled(!store.hasUnsavedChanges)
-            .help("Alle Änderungen verwerfen")
         }
 
         ToolbarItem(placement: .primaryAction) {
@@ -580,6 +710,17 @@ struct ToolbarItems: ToolbarContent {
             .keyboardShortcut("s", modifiers: .command)
             .disabled(!store.hasUnsavedChanges || store.isLoading)
             .help("Mit automatischem Backup speichern (⌘S)")
+        }
+
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                store.saveAsFolderPicker()
+            } label: {
+                Label("Speichern unter…", systemImage: "square.and.arrow.up")
+            }
+            .keyboardShortcut("s", modifiers: [.command, .shift])
+            .disabled(store.folderURL == nil || store.isLoading)
+            .help("Senderliste an einen anderen Ort speichern (⇧⌘S)")
         }
     }
 }
