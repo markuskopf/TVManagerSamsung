@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:Samsung_Sender_Management}/TVSenderManager",
+            "name": "Debug TVSenderManager (TVSenderManager)",
+            "target": "TVSenderManager",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug TVSenderManager (TVSenderManager)"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:Samsung_Sender_Management}/TVSenderManager",
+            "name": "Release TVSenderManager (TVSenderManager)",
+            "target": "TVSenderManager",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release TVSenderManager (TVSenderManager)"
+        }
+    ]
+}
