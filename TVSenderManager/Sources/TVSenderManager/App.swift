@@ -1,8 +1,18 @@
 import SwiftUI
+import AppKit
 
 @main
 struct TVSenderManagerApp: App {
     @StateObject private var store = ChannelStore()
+
+    init() {
+        // When launched as a bare executable (no .app bundle), macOS would
+        // otherwise treat the process as an "accessory" and never bring its
+        // window to the foreground. Force regular activation so the window
+        // shows up no matter how the app is started.
+        NSApplication.shared.setActivationPolicy(.regular)
+        NSApplication.shared.activate(ignoringOtherApps: true)
+    }
 
     var body: some Scene {
         WindowGroup("Samsung TV Senderverwaltung") {

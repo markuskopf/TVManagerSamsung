@@ -65,33 +65,43 @@ final class ChannelStore: ObservableObject {
         isLoading = true
         lastError = nil
         status = "Lade Senderliste…"
-        Task.detached(priority: .userInitiated) { [weak self] in
+        Task {
             do {
-                let db = try ChannelDB(folderURL: url)
-                let cable = try db.loadChannels(.cable)
-                let ip    = try db.loadChannels(.ip)
-                await MainActor.run {
-                    guard let self else { return }
-                    self.db = db
-                    self.folderURL = url
-                    self.folderName = url.lastPathComponent
-                    self.channelsBySource = [.cable: cable, .ip: ip]
-                    self.originals = Dictionary(uniqueKeysWithValues: (cable + ip).map { ($0.srvId, $0) })
-                    self.edits = [:]
-                    self.selection = []
-                    if cable.isEmpty && !ip.isEmpty { self.selectedSource = .ip }
-                    else { self.selectedSource = .cable }
-                    self.status = "\(cable.count) Kabel-Sender · \(ip.count) IP-Sender"
-                    self.isLoading = false
-                }
+                let payload = try await Self.loadInBackground(url)
+                self.db = payload.db
+                self.folderURL = url
+                self.folderName = url.lastPathComponent
+                self.channelsBySource = payload.channels
+                self.originals = payload.originals
+                self.edits = [:]
+                self.selection = []
+                let cable = payload.channels[.cable] ?? []
+                let ip    = payload.channels[.ip]    ?? []
+                self.selectedSource = (cable.isEmpty && !ip.isEmpty) ? .ip : .cable
+                self.status = "\(cable.count) Kabel-Sender · \(ip.count) IP-Sender"
+                self.isLoading = false
             } catch {
-                await MainActor.run {
-                    self?.lastError = error.localizedDescription
-                    self?.status = "Fehler beim Öffnen"
-                    self?.isLoading = false
-                }
+                self.lastError = error.localizedDescription
+                self.status = "Fehler beim Öffnen"
+                self.isLoading = false
             }
         }
+    }
+
+    private struct LoadPayload: Sendable {
+        let db: ChannelDB
+        let channels: [Source: [Channel]]
+        let originals: [Int64: Channel]
+    }
+
+    nonisolated private static func loadInBackground(_ url: URL) async throws -> LoadPayload {
+        try await Task.detached(priority: .userInitiated) {
+            let db = try ChannelDB(folderURL: url)
+            let cable = try db.loadChannels(.cable)
+            let ip    = try db.loadChannels(.ip)
+            let originals = Dictionary(uniqueKeysWithValues: (cable + ip).map { ($0.srvId, $0) })
+            return LoadPayload(db: db, channels: [.cable: cable, .ip: ip], originals: originals)
+        }.value
     }
 
     // MARK: - Edits
@@ -237,33 +247,51 @@ final class ChannelStore: ObservableObject {
         let editsCopy = edits
         let originalsCopy = originals
         let folder = folderURL
-        Task.detached(priority: .userInitiated) { [weak self] in
+        Task {
             do {
-                let backupURL = try Self.makeBackup(of: folder)
-                let db = try ChannelDB(folderURL: folder)
-                try db.save(edits: editsCopy, originals: originalsCopy)
-
-                // Reload to refresh originals.
-                let cable = try db.loadChannels(.cable)
-                let ip    = try db.loadChannels(.ip)
-
-                await MainActor.run {
-                    guard let self else { return }
-                    self.db = db
-                    self.channelsBySource = [.cable: cable, .ip: ip]
-                    self.originals = Dictionary(uniqueKeysWithValues: (cable + ip).map { ($0.srvId, $0) })
-                    self.edits = [:]
-                    self.status = "Gespeichert · Backup: \(backupURL.lastPathComponent)"
-                    self.isLoading = false
-                }
+                let result = try await Self.saveInBackground(folder: folder,
+                                                             edits: editsCopy,
+                                                             originals: originalsCopy)
+                self.db = result.db
+                self.channelsBySource = result.channels
+                self.originals = result.originals
+                self.edits = [:]
+                self.status = "Gespeichert · Backup: \(result.backupName)"
+                self.isLoading = false
             } catch {
-                await MainActor.run {
-                    self?.lastError = error.localizedDescription
-                    self?.status = "Speichern fehlgeschlagen"
-                    self?.isLoading = false
-                }
+                self.lastError = error.localizedDescription
+                self.status = "Speichern fehlgeschlagen"
+                self.isLoading = false
             }
         }
+    }
+
+    private struct SavePayload: Sendable {
+        let db: ChannelDB
+        let channels: [Source: [Channel]]
+        let originals: [Int64: Channel]
+        let backupName: String
+    }
+
+    nonisolated private static func saveInBackground(
+        folder: URL,
+        edits: [Int64: ChannelEdits],
+        originals: [Int64: Channel]
+    ) async throws -> SavePayload {
+        try await Task.detached(priority: .userInitiated) {
+            let backupURL = try makeBackup(of: folder)
+            let db = try ChannelDB(folderURL: folder)
+            try db.save(edits: edits, originals: originals)
+            let cable = try db.loadChannels(.cable)
+            let ip    = try db.loadChannels(.ip)
+            let refreshed = Dictionary(uniqueKeysWithValues: (cable + ip).map { ($0.srvId, $0) })
+            return SavePayload(
+                db: db,
+                channels: [.cable: cable, .ip: ip],
+                originals: refreshed,
+                backupName: backupURL.lastPathComponent
+            )
+        }.value
     }
 
     nonisolated private static func makeBackup(of folder: URL) throws -> URL {

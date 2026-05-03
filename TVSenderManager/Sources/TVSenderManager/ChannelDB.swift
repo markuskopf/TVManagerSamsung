@@ -1,7 +1,9 @@
 import Foundation
 
 /// Bundles the three SQLite files inside a Samsung `Channel_list_…` folder.
-final class ChannelDB {
+/// Marked `@unchecked Sendable` because all access is funnelled through the
+/// owning `ChannelStore`, which serialises calls on a single Task at a time.
+final class ChannelDB: @unchecked Sendable {
     let folderURL: URL
     private let cableDB: Database?
     private let ipDB:    Database?

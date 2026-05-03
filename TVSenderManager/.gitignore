@@ -1,0 +1,6 @@
+.build/
+.swiftpm/
+TVSenderManager.app/
+*.xcodeproj/
+DerivedData/
+.DS_Store

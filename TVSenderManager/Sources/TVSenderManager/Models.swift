@@ -30,7 +30,7 @@ enum Source: String, CaseIterable, Identifiable, Hashable {
 }
 
 /// One service ("channel") as shown in the UI.
-struct Channel: Identifiable, Hashable {
+struct Channel: Identifiable, Hashable, Sendable {
     let srvId: Int64
     let source: Source
     var major: Int
@@ -88,7 +88,7 @@ enum Quality {
 }
 
 /// Marks per-row edits so we know what to write on save.
-struct ChannelEdits: Equatable {
+struct ChannelEdits: Equatable, Sendable {
     var name: String?
     var major: Int?
     var hidden: Bool?
